@@ -22,6 +22,15 @@
 #include <QVector>
 #include <QTimer>
 #include <QKeyEvent>
+#include <QSlider>
+#include <QSpinBox>
+#include <QOpenGLWidget>
+#include <QOpenGLFunctions>
+#include <QOpenGLBuffer>
+#include <QOpenGLVertexArrayObject>
+#include <QOpenGLShaderProgram>
+#include <QMatrix4x4>
+#include <QVector3D>
 
 class MainWindow : public QMainWindow
 {
@@ -70,6 +79,9 @@ private slots:
     // G-code işleme
     void sendGCodeCommand();
     void processGCodeFile();
+    void runFromLine();
+    void updateJogSpeed();
+    void updateTotalLines();
 
 private:
     // UI bileşenleri oluşturma
@@ -112,6 +124,9 @@ private:
     QGroupBox *gcodeGroup;
     QGroupBox *simulationGroup;
     
+    // OpenGL 3D görselleştirme
+    OpenGLWidget *openGLWidget;
+    
     // Eksen kontrolü - Güncellenmiş
     QPushButton *xPosBtn, *xNegBtn;
     QPushButton *yPosBtn, *yNegBtn;
@@ -122,6 +137,8 @@ private:
     // Yeni eksen kontrolü bileşenleri
     QComboBox *jogStepCombo;  // Jog adım mesafesi
     QComboBox *jogSpeedCombo; // Jog hızı
+    QSlider *jogSpeedSlider;  // Jog hızı slider
+    QLabel *jogSpeedLabel;    // Jog hızı gösterge
     QComboBox *feedRateCombo; // Feedrate
     
     // Sürekli jog için timer'lar
@@ -136,6 +153,11 @@ private:
     QPushButton *sendCommandBtn;
     QLineEdit *commandEdit;
     QProgressBar *progressBar;
+    
+    // Run from line özelliği
+    QSpinBox *runFromLineSpinBox;
+    QPushButton *runFromLineBtn;
+    QLabel *totalLinesLabel;
     
     // Kontrol paneli
     QPushButton *startBtn, *stopBtn, *pauseBtn, *resetBtn;

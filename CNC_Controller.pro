@@ -1,4 +1,4 @@
-QT += core widgets
+QT += core widgets opengl
 
 CONFIG += c++17
 
@@ -7,10 +7,16 @@ TEMPLATE = app
 
 SOURCES += \
     src/main.cpp \
-    src/mainwindow.cpp
+    src/mainwindow.cpp \
+    src/openglwidget.cpp
 
 HEADERS += \
-    include/mainwindow.h
+    include/mainwindow.h \
+    include/plugininterface.h \
+    include/logger.h \
+    include/settings.h \
+    include/performancemonitor.h \
+    include/openglwidget.h
 
 INCLUDEPATH += include
 
