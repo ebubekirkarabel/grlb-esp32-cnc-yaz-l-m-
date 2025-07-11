@@ -107,8 +107,6 @@ private:
     double getJogStep();
     
     // Emergency Stop fonksiyonları
-    void emergencyStop();
-    void resetEmergencyStop();
     bool isEmergencyStopActive() const { return emergencyStopActive; }
     
     // UI bileşenleri

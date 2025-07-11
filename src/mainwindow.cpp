@@ -236,10 +236,20 @@ void MainWindow::createAxisControlPanel()
     jogStepCombo->addItems({"0.1", "0.5", "1.0", "5.0", "10.0"});
     jogStepCombo->setCurrentText("1.0");
     
-    // Jog hızı
+    // Jog hızı - Geliştirilmiş
     jogSpeedCombo = new QComboBox;
-    jogSpeedCombo->addItems({"100", "500", "1000", "2000", "5000"});
+    jogSpeedCombo->addItems({"50", "100", "250", "500", "1000", "2000", "5000", "10000"});
     jogSpeedCombo->setCurrentText("1000");
+    
+    // Jog hızı slider (daha hassas kontrol için)
+    jogSpeedSlider = new QSlider(Qt::Horizontal);
+    jogSpeedSlider->setRange(50, 10000);
+    jogSpeedSlider->setValue(1000);
+    jogSpeedSlider->setTickPosition(QSlider::TicksBelow);
+    jogSpeedSlider->setTickInterval(1000);
+    
+    // Jog hızı gösterge etiketi
+    jogSpeedLabel = new QLabel("1000 mm/min");
     
     // Feedrate
     feedRateCombo = new QComboBox;
@@ -250,8 +260,10 @@ void MainWindow::createAxisControlPanel()
     speedLayout->addWidget(jogStepCombo, 0, 1);
     speedLayout->addWidget(new QLabel("Jog Hızı (mm/min):"), 1, 0);
     speedLayout->addWidget(jogSpeedCombo, 1, 1);
-    speedLayout->addWidget(new QLabel("Feedrate (mm/min):"), 2, 0);
-    speedLayout->addWidget(feedRateCombo, 2, 1);
+    speedLayout->addWidget(jogSpeedSlider, 2, 0, 1, 2);
+    speedLayout->addWidget(jogSpeedLabel, 3, 0, 1, 2);
+    speedLayout->addWidget(new QLabel("Feedrate (mm/min):"), 4, 0);
+    speedLayout->addWidget(feedRateCombo, 4, 1);
     
     layout->addWidget(speedGroup);
     
@@ -259,7 +271,12 @@ void MainWindow::createAxisControlPanel()
     connect(jogStepCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged),
             [this](const QString &text) { jogStep = text.toDouble(); });
     connect(jogSpeedCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged),
-            [this](const QString &text) { jogSpeed = text.toInt(); });
+            [this](const QString &text) { 
+                jogSpeed = text.toInt(); 
+                jogSpeedSlider->setValue(jogSpeed);
+                updateJogSpeed();
+            });
+    connect(jogSpeedSlider, &QSlider::valueChanged, this, &MainWindow::updateJogSpeed);
     connect(feedRateCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged),
             [this](const QString &text) { feedRate = text.toInt(); });
 }

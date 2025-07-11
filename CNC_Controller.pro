@@ -12,10 +12,6 @@ SOURCES += \
 
 HEADERS += \
     include/mainwindow.h \
-    include/plugininterface.h \
-    include/logger.h \
-    include/settings.h \
-    include/performancemonitor.h \
     include/openglwidget.h
 
 INCLUDEPATH += include
