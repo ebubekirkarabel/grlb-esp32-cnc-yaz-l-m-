@@ -3,95 +3,132 @@
 
 #include <QObject>
 #include <QSettings>
-#include <QVariant>
 #include <QString>
-
-// Ayar kategorileri
-enum class SettingsCategory {
-    General,        // Genel ayarlar
-    Machine,        // Makine parametreleri
-    Communication,  // İletişim ayarları
-    GCode,          // G-code ayarları
-    UI,             // Kullanıcı arayüzü
-    Safety,         // Güvenlik ayarları
-    Performance,    // Performans ayarları
-    Advanced        // Gelişmiş ayarlar
-};
+#include <QVariant>
 
 class Settings : public QObject
 {
     Q_OBJECT
 
 public:
-    static Settings* instance();
+    explicit Settings(QObject *parent = nullptr);
+    ~Settings();
     
-    // Temel ayar işlemleri
-    void setValue(SettingsCategory category, const QString &key, const QVariant &value);
-    QVariant getValue(SettingsCategory category, const QString &key, const QVariant &defaultValue = QVariant());
+    // Genel ayarlar
+    void setValue(const QString &key, const QVariant &value);
+    QVariant getValue(const QString &key, const QVariant &defaultValue = QVariant()) const;
     
-    // Makine ayarları
-    void setMachineLimits(double xMin, double xMax, double yMin, double yMax, double zMin, double zMax);
-    void getMachineLimits(double &xMin, double &xMax, double &yMin, double &yMax, double &zMin, double &zMax);
+    // Seri port ayarları
+    void setSerialPort(const QString &port);
+    QString getSerialPort() const;
+    void setBaudRate(int baudRate);
+    int getBaudRate() const;
+    void setDataBits(int dataBits);
+    int getDataBits() const;
+    void setParity(int parity);
+    int getParity() const;
+    void setStopBits(int stopBits);
+    int getStopBits() const;
     
-    void setMachineSpeeds(double maxFeedRate, double maxJogSpeed, double maxSpindleSpeed);
-    void getMachineSpeeds(double &maxFeedRate, double &maxJogSpeed, double &maxSpindleSpeed);
+    // Eksen ayarları
+    void setAxisLimits(char axis, double minLimit, double maxLimit);
+    double getAxisMinLimit(char axis) const;
+    double getAxisMaxLimit(char axis) const;
+    void setAxisEnabled(char axis, bool enabled);
+    bool isAxisEnabled(char axis) const;
     
-    // İletişim ayarları
-    void setSerialSettings(const QString &port, int baudRate, int dataBits, int stopBits, const QString &parity);
-    void getSerialSettings(QString &port, int &baudRate, int &dataBits, int &stopBits, QString &parity);
-    
-    void setNetworkSettings(const QString &ip, int port, const QString &protocol);
-    void getNetworkSettings(QString &ip, int &port, QString &protocol);
+    // Jog ayarları
+    void setJogStep(double step);
+    double getJogStep() const;
+    void setJogSpeed(double speed);
+    double getJogSpeed() const;
+    void setJogAcceleration(double acceleration);
+    double getJogAcceleration() const;
     
     // G-code ayarları
-    void setGCodeSettings(bool autoLeveling, bool toolCompensation, double defaultFeedRate);
-    void getGCodeSettings(bool &autoLeveling, bool &toolCompensation, double &defaultFeedRate);
-    
-    // Güvenlik ayarları
-    void setSafetySettings(bool hardLimits, bool softLimits, bool emergencyStop, double maxAcceleration);
-    void getSafetySettings(bool &hardLimits, bool &softLimits, bool &emergencyStop, double &maxAcceleration);
-    
-    // Performans ayarları
-    void setPerformanceSettings(int updateInterval, bool realTimeMonitoring, bool performanceLogging);
-    void getPerformanceSettings(int &updateInterval, bool &realTimeMonitoring, bool &performanceLogging);
+    void setDefaultFeedRate(double feedRate);
+    double getDefaultFeedRate() const;
+    void setMaxFeedRate(double maxFeedRate);
+    double getMaxFeedRate() const;
+    void setGCodeEditorFont(const QString &fontFamily, int fontSize);
+    QString getGCodeEditorFontFamily() const;
+    int getGCodeEditorFontSize() const;
     
     // UI ayarları
-    void setUISettings(const QString &theme, bool darkMode, int fontSize, bool showTooltips);
-    void getUISettings(QString &theme, bool &darkMode, int &fontSize, bool &showTooltips);
+    void setWindowGeometry(const QByteArray &geometry);
+    QByteArray getWindowGeometry() const;
+    void setWindowState(const QByteArray &state);
+    QByteArray getWindowState() const;
+    void setTheme(const QString &theme);
+    QString getTheme() const;
     
-    // Gelişmiş ayarlar (gelecekteki özellikler için)
-    void setAdvancedSettings(bool pluginSystem, bool webInterface, bool cloudSync, bool aiFeatures);
-    void getAdvancedSettings(bool &pluginSystem, bool &webInterface, bool &cloudSync, bool &aiFeatures);
+    // Dosya ayarları
+    void setLastDirectory(const QString &directory);
+    QString getLastDirectory() const;
+    void setRecentFiles(const QStringList &files);
+    QStringList getRecentFiles() const;
+    void addRecentFile(const QString &file);
     
-    // Ayar yönetimi
+    // Ayarları kaydetme/yükleme
     void saveSettings();
     void loadSettings();
     void resetToDefaults();
-    void exportSettings(const QString &filePath);
-    void importSettings(const QString &filePath);
     
-    // Ayar değişiklik sinyalleri
-    void notifySettingChanged(SettingsCategory category, const QString &key, const QVariant &value);
-
+    // Ayarları dışa/içe aktarma
+    bool exportSettings(const QString &filename);
+    bool importSettings(const QString &filename);
+    
 signals:
-    void settingChanged(SettingsCategory category, const QString &key, const QVariant &value);
-    void settingsSaved();
+    void settingsChanged(const QString &key, const QVariant &value);
     void settingsLoaded();
+    void settingsSaved();
 
 private:
-    Settings(QObject *parent = nullptr);
-    ~Settings();
+    QSettings *settings;
     
-    static Settings* m_instance;
-    QSettings* m_settings;
-    
-    QString categoryToString(SettingsCategory category);
-    QString getFullKey(SettingsCategory category, const QString &key);
+    void initializeDefaults();
+    QString getAxisKey(char axis, const QString &property) const;
 };
 
-// Kolay kullanım için makrolar
-#define SETTINGS Settings::instance()
-#define SET_VALUE(category, key, value) SETTINGS->setValue(category, key, value)
-#define GET_VALUE(category, key, defaultValue) SETTINGS->getValue(category, key, defaultValue)
+// Ayarlar için sabitler
+namespace SettingsKeys {
+    // Seri port
+    const QString SERIAL_PORT = "Serial/Port";
+    const QString SERIAL_BAUD_RATE = "Serial/BaudRate";
+    const QString SERIAL_DATA_BITS = "Serial/DataBits";
+    const QString SERIAL_PARITY = "Serial/Parity";
+    const QString SERIAL_STOP_BITS = "Serial/StopBits";
+    
+    // Eksenler
+    const QString AXIS_X_MIN_LIMIT = "Axis/X/MinLimit";
+    const QString AXIS_X_MAX_LIMIT = "Axis/X/MaxLimit";
+    const QString AXIS_X_ENABLED = "Axis/X/Enabled";
+    const QString AXIS_Y_MIN_LIMIT = "Axis/Y/MinLimit";
+    const QString AXIS_Y_MAX_LIMIT = "Axis/Y/MaxLimit";
+    const QString AXIS_Y_ENABLED = "Axis/Y/Enabled";
+    const QString AXIS_Z_MIN_LIMIT = "Axis/Z/MinLimit";
+    const QString AXIS_Z_MAX_LIMIT = "Axis/Z/MaxLimit";
+    const QString AXIS_Z_ENABLED = "Axis/Z/Enabled";
+    
+    // Jog
+    const QString JOG_STEP = "Jog/Step";
+    const QString JOG_SPEED = "Jog/Speed";
+    const QString JOG_ACCELERATION = "Jog/Acceleration";
+    
+    // G-code
+    const QString GCODE_DEFAULT_FEED_RATE = "GCode/DefaultFeedRate";
+    const QString GCODE_MAX_FEED_RATE = "GCode/MaxFeedRate";
+    const QString GCODE_EDITOR_FONT_FAMILY = "GCode/EditorFontFamily";
+    const QString GCODE_EDITOR_FONT_SIZE = "GCode/EditorFontSize";
+    
+    // UI
+    const QString UI_WINDOW_GEOMETRY = "UI/WindowGeometry";
+    const QString UI_WINDOW_STATE = "UI/WindowState";
+    const QString UI_THEME = "UI/Theme";
+    
+    // Dosya
+    const QString FILE_LAST_DIRECTORY = "File/LastDirectory";
+    const QString FILE_RECENT_FILES = "File/RecentFiles";
+}
 
 #endif // SETTINGS_H 

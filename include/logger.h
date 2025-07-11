@@ -1,32 +1,19 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
-#include <QString>
 #include <QObject>
+#include <QString>
 #include <QFile>
 #include <QTextStream>
 #include <QMutex>
 #include <QDateTime>
 
-// Log seviyeleri
 enum class LogLevel {
     Debug,
     Info,
     Warning,
     Error,
     Critical
-};
-
-// Log kategorileri
-enum class LogCategory {
-    General,
-    GCode,
-    Communication,
-    Machine,
-    Safety,
-    Performance,
-    User,
-    System
 };
 
 class Logger : public QObject
@@ -37,58 +24,93 @@ public:
     static Logger* instance();
     
     // Logging fonksiyonları
-    void log(LogLevel level, LogCategory category, const QString &message);
-    void debug(LogCategory category, const QString &message);
-    void info(LogCategory category, const QString &message);
-    void warning(LogCategory category, const QString &message);
-    void error(LogCategory category, const QString &message);
-    void critical(LogCategory category, const QString &message);
+    void log(LogLevel level, const QString &message, const QString &category = "");
+    void debug(const QString &message, const QString &category = "");
+    void info(const QString &message, const QString &category = "");
+    void warning(const QString &message, const QString &category = "");
+    void error(const QString &message, const QString &category = "");
+    void critical(const QString &message, const QString &category = "");
     
-    // Log yönetimi
+    // Dosya yönetimi
+    void setLogFile(const QString &filename);
+    void setMaxFileSize(qint64 maxSize);
+    void setMaxLogFiles(int maxFiles);
+    void rotateLogFiles();
+    
+    // Filtreleme
     void setLogLevel(LogLevel level);
-    void setLogFile(const QString &filePath);
-    void enableConsoleOutput(bool enable);
-    void enableFileOutput(bool enable);
+    void setCategoryFilter(const QStringList &categories);
+    void enableCategory(const QString &category, bool enabled = true);
     
-    // Log analizi (gelecekteki özellikler için)
-    QString getLogsByCategory(LogCategory category, int maxLines = 100);
-    QString getLogsByLevel(LogLevel level, int maxLines = 100);
-    QString getLogsByTimeRange(const QDateTime &start, const QDateTime &end);
+    // Ayarlar
+    void setTimestampFormat(const QString &format);
+    void setIncludeTimestamp(bool include);
+    void setIncludeCategory(bool include);
+    void setIncludeLevel(bool include);
     
-    // Performans metrikleri
-    void logPerformance(const QString &operation, qint64 duration);
-    void logMachineStatus(const QString &status);
-    void logUserAction(const QString &action);
-
+    // Yardımcı fonksiyonlar
+    QString levelToString(LogLevel level) const;
+    LogLevel stringToLevel(const QString &level) const;
+    QString getCurrentLogFile() const;
+    qint64 getCurrentFileSize() const;
+    
+    // Log temizleme
+    void clearLog();
+    void exportLog(const QString &filename);
+    
 signals:
-    void logMessageAdded(LogLevel level, LogCategory category, const QString &message);
+    void messageLogged(LogLevel level, const QString &message, const QString &category);
+    void logFileChanged(const QString &filename);
+    void logFileRotated(const QString &oldFile, const QString &newFile);
 
 private:
-    Logger(QObject *parent = nullptr);
+    explicit Logger(QObject *parent = nullptr);
     ~Logger();
     
     static Logger* m_instance;
-    QFile m_logFile;
-    QTextStream m_logStream;
-    LogLevel m_currentLevel;
-    bool m_consoleEnabled;
-    bool m_fileEnabled;
-    QMutex m_mutex;
     
-    QString levelToString(LogLevel level);
-    QString categoryToString(LogCategory category);
-    QString formatMessage(LogLevel level, LogCategory category, const QString &message);
+    QFile *logFile;
+    QTextStream *logStream;
+    QMutex logMutex;
+    
+    LogLevel currentLogLevel;
+    QStringList enabledCategories;
+    QStringList categoryFilter;
+    
+    QString logFilename;
+    qint64 maxFileSize;
+    int maxLogFiles;
+    
+    QString timestampFormat;
+    bool includeTimestamp;
+    bool includeCategory;
+    bool includeLevel;
+    
+    void writeToFile(const QString &message);
+    void writeToConsole(const QString &message);
+    bool shouldLog(LogLevel level, const QString &category) const;
+    QString formatMessage(LogLevel level, const QString &message, const QString &category) const;
+    void checkFileSize();
+    void backupLogFile();
 };
 
 // Kolay kullanım için makrolar
-#define LOG_DEBUG(category, message) Logger::instance()->debug(category, message)
-#define LOG_INFO(category, message) Logger::instance()->info(category, message)
-#define LOG_WARNING(category, message) Logger::instance()->warning(category, message)
-#define LOG_ERROR(category, message) Logger::instance()->error(category, message)
-#define LOG_CRITICAL(category, message) Logger::instance()->critical(category, message)
+#define LOG_DEBUG(msg, cat) Logger::instance()->debug(msg, cat)
+#define LOG_INFO(msg, cat) Logger::instance()->info(msg, cat)
+#define LOG_WARNING(msg, cat) Logger::instance()->warning(msg, cat)
+#define LOG_ERROR(msg, cat) Logger::instance()->error(msg, cat)
+#define LOG_CRITICAL(msg, cat) Logger::instance()->critical(msg, cat)
 
-#define LOG_PERFORMANCE(operation, duration) Logger::instance()->logPerformance(operation, duration)
-#define LOG_MACHINE_STATUS(status) Logger::instance()->logMachineStatus(status)
-#define LOG_USER_ACTION(action) Logger::instance()->logUserAction(action)
+// Kategori sabitleri
+namespace LogCategories {
+    const QString MAIN = "Main";
+    const QString UI = "UI";
+    const QString SERIAL = "Serial";
+    const QString GCODE = "GCode";
+    const QString AXIS = "Axis";
+    const QString SIMULATION = "Simulation";
+    const QString SETTINGS = "Settings";
+    const QString EMERGENCY = "Emergency";
+}
 
 #endif // LOGGER_H 

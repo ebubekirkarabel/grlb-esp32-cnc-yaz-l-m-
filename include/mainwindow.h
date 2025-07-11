@@ -32,6 +32,13 @@
 #include <QMatrix4x4>
 #include <QVector3D>
 
+// Yeni modül header'ları
+#include "gcodeparser.h"
+#include "serialcommunication.h"
+#include "axiscontroller.h"
+#include "settings.h"
+#include "logger.h"
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -109,6 +116,10 @@ private:
     // Emergency Stop fonksiyonları
     bool isEmergencyStopActive() const { return emergencyStopActive; }
     
+    // Modül bağlantıları
+    void connectModules();
+    void initializeModules();
+    
     // UI bileşenleri
     QWidget *centralWidget;
     
@@ -183,6 +194,13 @@ private:
     bool emergencyStopActive;
     QPushButton *emergencyStopBtn;
     QLabel *emergencyStopLabel;
+    
+    // Modül nesneleri
+    GCodeParser *gcodeParser;
+    SerialCommunication *serialComm;
+    AxisController *axisController;
+    Settings *settings;
+    Logger *logger;
 };
 
 #endif // MAINWINDOW_H 

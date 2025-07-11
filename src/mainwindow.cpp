@@ -4,62 +4,57 @@
 #include <QFile>
 #include <QTextStream>
 #include <QTimer>
+#include <QMessageBox>
+#include <Qt>
 #include "openglwidget.h"
+#include "gcodeparser.h"
+#include "serialcommunication.h"
+#include "axiscontroller.h"
+#include "settings.h"
+#include "logger.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , currentCommandIndex(0)
-    , jogSpeed(1000)
-    , feedRate(1000)
-    , speedMultiplier(1.0)
-    , jogStep(1.0)
-    , currentJogAxis(' ')
-    , currentJogPositive(false)
-    , jogAcceleration(1.0)
+    , gcodeParser(new GCodeParser(this))
+    , serialComm(new SerialCommunication(this))
+    , axisController(new AxisController(this))
+    , settings(new Settings(this))
+    , logger(Logger::instance())
     , currentX(0.0)
     , currentY(0.0)
     , currentZ(0.0)
+    , jogSpeed(1000)
+    , feedRate(1000)
+    , jogStep(1.0)
     , emergencyStopActive(false)
+    , xMinLimit(-50.0)
+    , xMaxLimit(50.0)
+    , yMinLimit(-50.0)
+    , yMaxLimit(50.0)
+    , zMinLimit(-15.0)
+    , zMaxLimit(15.0)
 {
-    // Pencere ayarları
     setWindowTitle("CNC Controller v1.0");
     resize(1200, 800);
-    
-    // Pencereyi ekranın ortasına yerleştirme
     QScreen *screen = QApplication::primaryScreen();
     QRect screenGeometry = screen->geometry();
-    int x = (screenGeometry.width() - width()) / 2;
-    int y = (screenGeometry.height() - height()) / 2;
-    move(x, y);
-    
-    // Soft limits ayarlama (%15-%50 arası)
-    xMinLimit = -50.0; xMaxLimit = 50.0;
-    yMinLimit = -50.0; yMaxLimit = 50.0;
-    zMinLimit = -15.0; zMaxLimit = 15.0;
-    
-    // Jog timer'ını oluşturma
-    jogTimer = new QTimer(this);
-    jogTimer->setInterval(50); // 50ms = 20Hz
-    
-    // UI bileşenlerini oluşturma
+    move((screenGeometry.width() - width()) / 2, (screenGeometry.height() - height()) / 2);
+
     createMenus();
     createToolBar();
     createStatusBar();
     createCentralWidget();
     createEmergencyStopPanel();
     setupConnections();
-    
-    // Başlangıç durumu
+    initializeModules();
+    connectModules();
     updateStatusBar("Hazır");
     logMessage("CNC Controller başlatıldı");
 }
 
-MainWindow::~MainWindow()
-{
-}
+MainWindow::~MainWindow() {}
 
-void MainWindow::createMenus()
-{
+void MainWindow::createMenus() {
     // Dosya menüsü
     QMenu *fileMenu = menuBar()->addMenu("&Dosya");
     
@@ -135,17 +130,17 @@ void MainWindow::createCentralWidget()
     // Ana layout
     QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
     
-    // Sol panel (Eksen kontrolü)
+    // Sol panel (G-code)
+    createGCodePanel();
+    mainLayout->addWidget(gcodeGroup, 1);
+    
+    // Orta panel (3D Simülasyon)
+    createSimulationPanel();
+    mainLayout->addWidget(simulationGroup, 2);
+    
+    // Sağ panel (Eksen kontrolü)
     createAxisControlPanel();
     mainLayout->addWidget(axisControlGroup, 1);
-    
-    // Orta panel (G-code)
-    createGCodePanel();
-    mainLayout->addWidget(gcodeGroup, 2);
-    
-    // Sağ panel (Simülasyon)
-    createSimulationPanel();
-    mainLayout->addWidget(simulationGroup, 1);
 }
 
 void MainWindow::createAxisControlPanel()
@@ -268,16 +263,16 @@ void MainWindow::createAxisControlPanel()
     layout->addWidget(speedGroup);
     
     // Bağlantılar
-    connect(jogStepCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged),
+    connect(jogStepCombo, &QComboBox::currentTextChanged,
             [this](const QString &text) { jogStep = text.toDouble(); });
-    connect(jogSpeedCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged),
+    connect(jogSpeedCombo, &QComboBox::currentTextChanged,
             [this](const QString &text) { 
                 jogSpeed = text.toInt(); 
                 jogSpeedSlider->setValue(jogSpeed);
                 updateJogSpeed();
             });
     connect(jogSpeedSlider, &QSlider::valueChanged, this, &MainWindow::updateJogSpeed);
-    connect(feedRateCombo, QOverload<const QString &>::of(&QComboBox::currentTextChanged),
+    connect(feedRateCombo, &QComboBox::currentTextChanged,
             [this](const QString &text) { feedRate = text.toInt(); });
 }
 
@@ -446,12 +441,7 @@ void MainWindow::setupConnections()
     connect(zPosBtn, &QPushButton::clicked, this, &MainWindow::jogZPositive);
     connect(zNegBtn, &QPushButton::clicked, this, &MainWindow::jogZNegative);
     
-    // Sürekli jog timer bağlantısı
-    connect(jogTimer, &QTimer::timeout, [this]() {
-        if (currentJogAxis == 'X') continuousJogX();
-        else if (currentJogAxis == 'Y') continuousJogY();
-        else if (currentJogAxis == 'Z') continuousJogZ();
-    });
+
     
     // G-code işlemleri
     connect(openFileBtn, &QPushButton::clicked, this, &MainWindow::openGCodeFile);
@@ -529,10 +519,9 @@ void MainWindow::jogXPositive()
         return;
     }
     
-    double newX = currentX + jogStep;
-    if (checkSoftLimits('X', newX)) {
-        updateAxisPosition('X', newX);
-        logMessage(QString("X+ Jog: %1 mm (adım: %2 mm)").arg(newX).arg(jogStep));
+    if (axisController) {
+        axisController->startJog('X', true, jogStep, jogSpeed);
+        logMessage(QString("X+ Jog: %1 mm (adım: %2 mm)").arg(currentX + jogStep).arg(jogStep));
     }
 }
 
@@ -543,10 +532,9 @@ void MainWindow::jogXNegative()
         return;
     }
     
-    double newX = currentX - jogStep;
-    if (checkSoftLimits('X', newX)) {
-        updateAxisPosition('X', newX);
-        logMessage(QString("X- Jog: %1 mm (adım: %2 mm)").arg(newX).arg(jogStep));
+    if (axisController) {
+        axisController->startJog('X', false, jogStep, jogSpeed);
+        logMessage(QString("X- Jog: %1 mm (adım: %2 mm)").arg(currentX - jogStep).arg(jogStep));
     }
 }
 
@@ -557,10 +545,9 @@ void MainWindow::jogYPositive()
         return;
     }
     
-    double newY = currentY + jogStep;
-    if (checkSoftLimits('Y', newY)) {
-        updateAxisPosition('Y', newY);
-        logMessage(QString("Y+ Jog: %1 mm (adım: %2 mm)").arg(newY).arg(jogStep));
+    if (axisController) {
+        axisController->startJog('Y', true, jogStep, jogSpeed);
+        logMessage(QString("Y+ Jog: %1 mm (adım: %2 mm)").arg(currentY + jogStep).arg(jogStep));
     }
 }
 
@@ -571,10 +558,9 @@ void MainWindow::jogYNegative()
         return;
     }
     
-    double newY = currentY - jogStep;
-    if (checkSoftLimits('Y', newY)) {
-        updateAxisPosition('Y', newY);
-        logMessage(QString("Y- Jog: %1 mm (adım: %2 mm)").arg(newY).arg(jogStep));
+    if (axisController) {
+        axisController->startJog('Y', false, jogStep, jogSpeed);
+        logMessage(QString("Y- Jog: %1 mm (adım: %2 mm)").arg(currentY - jogStep).arg(jogStep));
     }
 }
 
@@ -585,10 +571,9 @@ void MainWindow::jogZPositive()
         return;
     }
     
-    double newZ = currentZ + jogStep;
-    if (checkSoftLimits('Z', newZ)) {
-        updateAxisPosition('Z', newZ);
-        logMessage(QString("Z+ Jog: %1 mm (adım: %2 mm)").arg(newZ).arg(jogStep));
+    if (axisController) {
+        axisController->startJog('Z', true, jogStep, jogSpeed);
+        logMessage(QString("Z+ Jog: %1 mm (adım: %2 mm)").arg(currentZ + jogStep).arg(jogStep));
     }
 }
 
@@ -599,10 +584,9 @@ void MainWindow::jogZNegative()
         return;
     }
     
-    double newZ = currentZ - jogStep;
-    if (checkSoftLimits('Z', newZ)) {
-        updateAxisPosition('Z', newZ);
-        logMessage(QString("Z- Jog: %1 mm (adım: %2 mm)").arg(newZ).arg(jogStep));
+    if (axisController) {
+        axisController->startJog('Z', false, jogStep, jogSpeed);
+        logMessage(QString("Z- Jog: %1 mm (adım: %2 mm)").arg(currentZ - jogStep).arg(jogStep));
     }
 }
 
@@ -772,18 +756,29 @@ void MainWindow::resetCNC()
 void MainWindow::sendGCodeCommand()
 {
     QString command = commandEdit->text().trimmed();
-    if (!command.isEmpty()) {
-        logMessage("G-code komutu gönderildi: " + command);
+    if (!command.isEmpty() && gcodeParser) {
+        GCodeCommand parsedCommand = gcodeParser->parseLine(command);
+        if (parsedCommand.isValid) {
+            logMessage("G-code komutu gönderildi: " + command);
+            if (serialComm && serialComm->isConnected()) {
+                serialComm->sendGCodeCommand(command);
+            }
+        } else {
+            logMessage("Geçersiz G-code komutu: " + parsedCommand.errorMessage);
+        }
         commandEdit->clear();
-        // Burada gerçek G-code işleme kodu gelecek
     }
 }
 
 void MainWindow::processGCodeFile()
 {
     QString gcode = gcodeEditor->toPlainText();
-    if (!gcode.isEmpty()) {
-        gcodeCommands = gcode.split('\n', QString::SkipEmptyParts);
+    if (!gcode.isEmpty() && gcodeParser) {
+        QVector<GCodeCommand> commands = gcodeParser->parseFile(gcode);
+        gcodeCommands.clear();
+        for (const GCodeCommand &cmd : commands) {
+            gcodeCommands.append(cmd.originalLine);
+        }
         currentCommandIndex = 0;
         progressBar->setVisible(true);
         progressBar->setMaximum(gcodeCommands.size());
@@ -798,8 +793,76 @@ void MainWindow::updateStatusBar(const QString &message)
 
 void MainWindow::logMessage(const QString &message)
 {
-    // Bu fonksiyon daha sonra log dosyasına yazma için genişletilecek
-    qDebug() << message;
+    // Logger modülünü kullan
+    if (logger) {
+        logger->info(message, LogCategories::MAIN);
+    } else {
+        qDebug() << message;
+    }
+}
+
+void MainWindow::initializeModules()
+{
+    // Logger'ı başlat
+    logger->setLogFile("cnc_controller.log");
+    logger->setLogLevel(LogLevel::Info);
+    
+    // Ayarları başlat
+    settings->loadSettings();
+    
+    // Ayarlardan değerleri yükle
+    jogStep = settings->getJogStep();
+    jogSpeed = settings->getJogSpeed();
+    feedRate = settings->getDefaultFeedRate();
+    
+    // Eksen limitlerini ayarla
+    axisController->setAxisLimits('X', settings->getAxisMinLimit('X'), settings->getAxisMaxLimit('X'));
+    axisController->setAxisLimits('Y', settings->getAxisMinLimit('Y'), settings->getAxisMaxLimit('Y'));
+    axisController->setAxisLimits('Z', settings->getAxisMinLimit('Z'), settings->getAxisMaxLimit('Z'));
+    
+    LOG_INFO("Modüller başlatıldı", LogCategories::MAIN);
+}
+
+void MainWindow::connectModules()
+{
+    // Eksen kontrolcüsü sinyallerini bağla
+    connect(axisController, &AxisController::positionChanged, this, [this](char axis, double position) {
+        updateAxisPosition(axis, position);
+    });
+    
+    connect(axisController, &AxisController::limitReached, this, [this](char axis, double position) {
+        logMessage(QString("%1 ekseni limit aşıldı: %2 mm").arg(axis).arg(position));
+    });
+    
+    connect(axisController, &AxisController::emergencyStopActivated, this, [this]() {
+        emergencyStop();
+    });
+    
+    // Seri iletişim sinyallerini bağla
+    connect(serialComm, &SerialCommunication::connected, this, [this]() {
+        updateStatusBar("Seri port bağlandı");
+        logMessage("Seri port bağlantısı kuruldu");
+    });
+    
+    connect(serialComm, &SerialCommunication::disconnected, this, [this]() {
+        updateStatusBar("Seri port bağlantısı kesildi");
+        logMessage("Seri port bağlantısı kesildi");
+    });
+    
+    connect(serialComm, &SerialCommunication::errorOccurred, this, [this](const QString &error) {
+        logMessage("Seri port hatası: " + error);
+    });
+    
+    // G-code parser sinyallerini bağla
+    connect(gcodeParser, &GCodeParser::parsingCompleted, this, [this](int totalCommands) {
+        logMessage(QString("G-code parsing tamamlandı: %1 komut").arg(totalCommands));
+    });
+    
+    connect(gcodeParser, &GCodeParser::parsingError, this, [this](int line, const QString &error) {
+        logMessage(QString("G-code parsing hatası (satır %1): %2").arg(line).arg(error));
+    });
+    
+    LOG_INFO("Modül bağlantıları kuruldu", LogCategories::MAIN);
 }
 
 // Yeni yardımcı fonksiyonlar
@@ -858,65 +921,46 @@ void MainWindow::startContinuousJog(char axis, bool positive)
         return;
     }
     
-    currentJogAxis = axis;
-    currentJogPositive = positive;
-    jogAcceleration = 1.0;
-    
-    if (!jogTimer->isActive()) {
-        jogTimer->start();
+    if (axisController) {
+        axisController->startContinuousJog(axis, positive);
+        logMessage(QString("Sürekli %1%2 jog başlatıldı").arg(axis).arg(positive ? "+" : "-"));
     }
-    
-    logMessage(QString("Sürekli %1%2 jog başlatıldı").arg(axis).arg(positive ? "+" : "-"));
 }
 
 void MainWindow::stopContinuousJog()
 {
-    if (jogTimer->isActive()) {
-        jogTimer->stop();
-        currentJogAxis = ' ';
-        jogAcceleration = 1.0;
+    if (axisController) {
+        axisController->stopContinuousJog();
         logMessage("Sürekli jog durduruldu");
     }
 }
 
-void MainWindow::continuousJogX()
-{
-    double step = (jogSpeed / 60.0) * (jogTimer->interval() / 1000.0) * jogAcceleration;
-    double newX = currentX + (currentJogPositive ? step : -step);
-    
-    if (checkSoftLimits('X', newX)) {
-        updateAxisPosition('X', newX);
-        jogAcceleration = qMin(jogAcceleration + 0.1, 3.0); // Maksimum 3x hızlanma
-    } else {
-        stopContinuousJog();
+void MainWindow::continuousJogX() {
+    if (axisController) {
+        axisController->startContinuousJog('X', true);
     }
 }
 
-void MainWindow::continuousJogY()
-{
-    double step = (jogSpeed / 60.0) * (jogTimer->interval() / 1000.0) * jogAcceleration;
-    double newY = currentY + (currentJogPositive ? step : -step);
-    
-    if (checkSoftLimits('Y', newY)) {
-        updateAxisPosition('Y', newY);
-        jogAcceleration = qMin(jogAcceleration + 0.1, 3.0); // Maksimum 3x hızlanma
-    } else {
-        stopContinuousJog();
+void MainWindow::continuousJogY() {
+    if (axisController) {
+        axisController->startContinuousJog('Y', true);
     }
 }
 
-void MainWindow::continuousJogZ()
-{
-    double step = (jogSpeed / 60.0) * (jogTimer->interval() / 1000.0) * jogAcceleration;
-    double newZ = currentZ + (currentJogPositive ? step : -step);
-    
-    if (checkSoftLimits('Z', newZ)) {
-        updateAxisPosition('Z', newZ);
-        jogAcceleration = qMin(jogAcceleration + 0.1, 3.0); // Maksimum 3x hızlanma
-    } else {
-        stopContinuousJog();
+void MainWindow::continuousJogZ() {
+    if (axisController) {
+        axisController->startContinuousJog('Z', true);
     }
 }
+
+void MainWindow::onJogButtonPressed() {
+    // Bu fonksiyon artık kullanılmıyor, modüllere yönlendirme yapılıyor
+}
+
+void MainWindow::onJogButtonReleased() {
+    // Bu fonksiyon artık kullanılmıyor, modüllere yönlendirme yapılıyor
+}
+
 
 double MainWindow::getJogStep()
 {
@@ -984,60 +1028,21 @@ void MainWindow::updateJogSpeed()
     jogSpeed = jogSpeedSlider->value();
     jogSpeedLabel->setText(QString::number(jogSpeed) + " mm/min");
     jogSpeedCombo->setCurrentText(QString::number(jogSpeed));
-}
-
-void MainWindow::createGCodePanel()
-{
-    gcodeGroup = new QGroupBox("G-Code İşleme");
-    QVBoxLayout *layout = new QVBoxLayout(gcodeGroup);
     
-    // Dosya işlemleri
-    QHBoxLayout *fileLayout = new QHBoxLayout;
-    openFileBtn = new QPushButton("Dosya Aç");
-    saveFileBtn = new QPushButton("Kaydet");
-    fileLayout->addWidget(openFileBtn);
-    fileLayout->addWidget(saveFileBtn);
-    fileLayout->addStretch();
-    layout->addLayout(fileLayout);
+    // AxisController'a yeni hızı bildir
+    if (axisController) {
+        axisController->setJogSpeed(jogSpeed);
+    }
     
-    // G-code editörü
-    gcodeEditor = new QTextEdit;
-    gcodeEditor->setPlaceholderText("G-code komutlarını buraya yazın veya dosya açın...");
-    layout->addWidget(gcodeEditor);
-    
-    // Komut gönderme
-    QHBoxLayout *commandLayout = new QHBoxLayout;
-    commandEdit = new QLineEdit;
-    commandEdit->setPlaceholderText("G-code komutu girin...");
-    sendCommandBtn = new QPushButton("Gönder");
-    commandLayout->addWidget(commandEdit);
-    commandLayout->addWidget(sendCommandBtn);
-    layout->addLayout(commandLayout);
-    
-    // İlerleme çubuğu
-    progressBar = new QProgressBar;
-    progressBar->setVisible(false);
-    layout->addWidget(progressBar);
-    
-    // Run from line paneli
-    QHBoxLayout *runLayout = new QHBoxLayout;
-    runFromLineSpinBox = new QSpinBox;
-    runFromLineSpinBox->setMinimum(1);
-    runFromLineSpinBox->setMaximum(1);
-    runFromLineBtn = new QPushButton("Satırdan Başlat");
-    totalLinesLabel = new QLabel("/ 0");
-    runLayout->addWidget(new QLabel("Satır:"));
-    runLayout->addWidget(runFromLineSpinBox);
-    runLayout->addWidget(totalLinesLabel);
-    runLayout->addWidget(runFromLineBtn);
-    layout->addLayout(runLayout);
-    
-    connect(runFromLineBtn, &QPushButton::clicked, this, &MainWindow::runFromLine);
+    // Ayarları kaydet
+    if (settings) {
+        settings->setJogSpeed(jogSpeed);
+    }
 }
 
 void MainWindow::updateTotalLines()
 {
-    int total = gcodeEditor->toPlainText().split('\n', QString::SkipEmptyParts).size();
+    int total = gcodeEditor->toPlainText().split('\n', Qt::SkipEmptyParts).size();
     runFromLineSpinBox->setMaximum(total > 0 ? total : 1);
     totalLinesLabel->setText("/ " + QString::number(total));
 }
@@ -1045,7 +1050,7 @@ void MainWindow::updateTotalLines()
 void MainWindow::runFromLine()
 {
     int line = runFromLineSpinBox->value();
-    QStringList lines = gcodeEditor->toPlainText().split('\n', QString::SkipEmptyParts);
+    QStringList lines = gcodeEditor->toPlainText().split('\n', Qt::SkipEmptyParts);
     if (line > 0 && line <= lines.size()) {
         // Sadece seçilen satırdan itibaren komutları işle
         QStringList subLines = lines.mid(line - 1);
