@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QTextStream>
 #include <QTimer>
+#include "openglwidget.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -235,20 +236,10 @@ void MainWindow::createAxisControlPanel()
     jogStepCombo->addItems({"0.1", "0.5", "1.0", "5.0", "10.0"});
     jogStepCombo->setCurrentText("1.0");
     
-    // Jog hızı - Geliştirilmiş
+    // Jog hızı
     jogSpeedCombo = new QComboBox;
-    jogSpeedCombo->addItems({"50", "100", "250", "500", "1000", "2000", "5000", "10000"});
+    jogSpeedCombo->addItems({"100", "500", "1000", "2000", "5000"});
     jogSpeedCombo->setCurrentText("1000");
-    
-    // Jog hızı slider (daha hassas kontrol için)
-    jogSpeedSlider = new QSlider(Qt::Horizontal);
-    jogSpeedSlider->setRange(50, 10000);
-    jogSpeedSlider->setValue(1000);
-    jogSpeedSlider->setTickPosition(QSlider::TicksBelow);
-    jogSpeedSlider->setTickInterval(1000);
-    
-    // Jog hızı gösterge etiketi
-    jogSpeedLabel = new QLabel("1000 mm/min");
     
     // Feedrate
     feedRateCombo = new QComboBox;
@@ -259,10 +250,8 @@ void MainWindow::createAxisControlPanel()
     speedLayout->addWidget(jogStepCombo, 0, 1);
     speedLayout->addWidget(new QLabel("Jog Hızı (mm/min):"), 1, 0);
     speedLayout->addWidget(jogSpeedCombo, 1, 1);
-    speedLayout->addWidget(jogSpeedSlider, 2, 0, 1, 2);
-    speedLayout->addWidget(jogSpeedLabel, 3, 0, 1, 2);
-    speedLayout->addWidget(new QLabel("Feedrate (mm/min):"), 4, 0);
-    speedLayout->addWidget(feedRateCombo, 4, 1);
+    speedLayout->addWidget(new QLabel("Feedrate (mm/min):"), 2, 0);
+    speedLayout->addWidget(feedRateCombo, 2, 1);
     
     layout->addWidget(speedGroup);
     
@@ -307,46 +296,53 @@ void MainWindow::createGCodePanel()
     progressBar = new QProgressBar;
     progressBar->setVisible(false);
     layout->addWidget(progressBar);
+    
+    // Run from line paneli
+    QHBoxLayout *runLayout = new QHBoxLayout;
+    runFromLineSpinBox = new QSpinBox;
+    runFromLineSpinBox->setMinimum(1);
+    runFromLineSpinBox->setMaximum(1);
+    runFromLineBtn = new QPushButton("Satırdan Başlat");
+    totalLinesLabel = new QLabel("/ 0");
+    runLayout->addWidget(new QLabel("Satır:"));
+    runLayout->addWidget(runFromLineSpinBox);
+    runLayout->addWidget(totalLinesLabel);
+    runLayout->addWidget(runFromLineBtn);
+    layout->addLayout(runLayout);
+    
+    connect(runFromLineBtn, &QPushButton::clicked, this, &MainWindow::runFromLine);
 }
 
 void MainWindow::createSimulationPanel()
 {
     simulationGroup = new QGroupBox("Simülasyon");
     QVBoxLayout *layout = new QVBoxLayout(simulationGroup);
-    
-    // Simülasyon alanı (şimdilik basit bir etiket)
-    QLabel *simLabel = new QLabel("3D Simülasyon Alanı\n(Bu alan daha sonra geliştirilecek)");
-    simLabel->setAlignment(Qt::AlignCenter);
-    simLabel->setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px solid #ccc; padding: 20px; }");
-    layout->addWidget(simLabel);
-    
+
+    // OpenGL 3D simülasyon alanı
+    openGLWidget = new OpenGLWidget;
+    layout->addWidget(openGLWidget, 1);
+
     // Kontrol butonları
     QGridLayout *controlLayout = new QGridLayout;
-    
     startBtn = new QPushButton("Başlat");
     stopBtn = new QPushButton("Durdur");
     pauseBtn = new QPushButton("Duraklat");
     resetBtn = new QPushButton("Sıfırla");
-    
     controlLayout->addWidget(startBtn, 0, 0);
     controlLayout->addWidget(stopBtn, 0, 1);
     controlLayout->addWidget(pauseBtn, 1, 0);
     controlLayout->addWidget(resetBtn, 1, 1);
-    
     layout->addLayout(controlLayout);
-    
+
     // Durum bilgileri
     QGroupBox *statusGroup = new QGroupBox("Durum");
     QVBoxLayout *statusLayout = new QVBoxLayout(statusGroup);
-    
     QLabel *statusLabel = new QLabel("Durum: Hazır");
     QLabel *lineLabel = new QLabel("Satır: 0/0");
     QLabel *timeLabel = new QLabel("Süre: 00:00");
-    
     statusLayout->addWidget(statusLabel);
     statusLayout->addWidget(lineLabel);
     statusLayout->addWidget(timeLabel);
-    
     layout->addWidget(statusGroup);
 }
 
@@ -482,6 +478,7 @@ void MainWindow::openGCodeFile()
             currentGCodeFile = fileName;
             updateStatusBar("Dosya açıldı: " + fileName);
             logMessage("G-code dosyası açıldı: " + fileName);
+            updateTotalLines(); // Dosya açıldığında toplam satır sayısını güncelle
         } else {
             QMessageBox::warning(this, "Hata", "Dosya açılamadı!");
         }
@@ -501,6 +498,7 @@ void MainWindow::saveGCodeFile()
             currentGCodeFile = fileName;
             updateStatusBar("Dosya kaydedildi: " + fileName);
             logMessage("G-code dosyası kaydedildi: " + fileName);
+            updateTotalLines(); // Dosya kaydedildiğinde toplam satır sayısını güncelle
         } else {
             QMessageBox::warning(this, "Hata", "Dosya kaydedilemedi!");
         }
@@ -961,5 +959,81 @@ void MainWindow::keyReleaseEvent(QKeyEvent *event)
         default:
             QMainWindow::keyReleaseEvent(event);
             break;
+    }
+} 
+
+void MainWindow::updateJogSpeed()
+{
+    jogSpeed = jogSpeedSlider->value();
+    jogSpeedLabel->setText(QString::number(jogSpeed) + " mm/min");
+    jogSpeedCombo->setCurrentText(QString::number(jogSpeed));
+}
+
+void MainWindow::createGCodePanel()
+{
+    gcodeGroup = new QGroupBox("G-Code İşleme");
+    QVBoxLayout *layout = new QVBoxLayout(gcodeGroup);
+    
+    // Dosya işlemleri
+    QHBoxLayout *fileLayout = new QHBoxLayout;
+    openFileBtn = new QPushButton("Dosya Aç");
+    saveFileBtn = new QPushButton("Kaydet");
+    fileLayout->addWidget(openFileBtn);
+    fileLayout->addWidget(saveFileBtn);
+    fileLayout->addStretch();
+    layout->addLayout(fileLayout);
+    
+    // G-code editörü
+    gcodeEditor = new QTextEdit;
+    gcodeEditor->setPlaceholderText("G-code komutlarını buraya yazın veya dosya açın...");
+    layout->addWidget(gcodeEditor);
+    
+    // Komut gönderme
+    QHBoxLayout *commandLayout = new QHBoxLayout;
+    commandEdit = new QLineEdit;
+    commandEdit->setPlaceholderText("G-code komutu girin...");
+    sendCommandBtn = new QPushButton("Gönder");
+    commandLayout->addWidget(commandEdit);
+    commandLayout->addWidget(sendCommandBtn);
+    layout->addLayout(commandLayout);
+    
+    // İlerleme çubuğu
+    progressBar = new QProgressBar;
+    progressBar->setVisible(false);
+    layout->addWidget(progressBar);
+    
+    // Run from line paneli
+    QHBoxLayout *runLayout = new QHBoxLayout;
+    runFromLineSpinBox = new QSpinBox;
+    runFromLineSpinBox->setMinimum(1);
+    runFromLineSpinBox->setMaximum(1);
+    runFromLineBtn = new QPushButton("Satırdan Başlat");
+    totalLinesLabel = new QLabel("/ 0");
+    runLayout->addWidget(new QLabel("Satır:"));
+    runLayout->addWidget(runFromLineSpinBox);
+    runLayout->addWidget(totalLinesLabel);
+    runLayout->addWidget(runFromLineBtn);
+    layout->addLayout(runLayout);
+    
+    connect(runFromLineBtn, &QPushButton::clicked, this, &MainWindow::runFromLine);
+}
+
+void MainWindow::updateTotalLines()
+{
+    int total = gcodeEditor->toPlainText().split('\n', QString::SkipEmptyParts).size();
+    runFromLineSpinBox->setMaximum(total > 0 ? total : 1);
+    totalLinesLabel->setText("/ " + QString::number(total));
+}
+
+void MainWindow::runFromLine()
+{
+    int line = runFromLineSpinBox->value();
+    QStringList lines = gcodeEditor->toPlainText().split('\n', QString::SkipEmptyParts);
+    if (line > 0 && line <= lines.size()) {
+        // Sadece seçilen satırdan itibaren komutları işle
+        QStringList subLines = lines.mid(line - 1);
+        // Burada G-code işleme fonksiyonunu çağırabilirsiniz
+        logMessage(QString("%1. satırdan başlatılıyor: %2 komut").arg(line).arg(subLines.size()));
+        // Örnek: openGLWidget->setToolpath(...);
     }
 } 
