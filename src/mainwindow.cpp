@@ -5,6 +5,8 @@
 #include <QTextStream>
 #include <QTimer>
 #include <QMessageBox>
+#include <QMenu>
+#include <QRegularExpression>
 #include <Qt>
 #include "openglwidget.h"
 #include "gcodeparser.h"
@@ -128,19 +130,160 @@ void MainWindow::createCentralWidget()
     setCentralWidget(centralWidget);
     
     // Ana layout
-    QHBoxLayout *mainLayout = new QHBoxLayout(centralWidget);
+    QVBoxLayout *mainLayout = new QVBoxLayout(centralWidget);
+    
+    // YENİ: Güvenlik durumu paneli
+    createSafetyStatusPanel();
+    mainLayout->addWidget(safetyStatusGroup);
+    
+    // Alt panel layout
+    QHBoxLayout *contentLayout = new QHBoxLayout;
     
     // Sol panel (G-code)
     createGCodePanel();
-    mainLayout->addWidget(gcodeGroup, 1);
+    contentLayout->addWidget(gcodeGroup, 1);
     
     // Orta panel (3D Simülasyon)
     createSimulationPanel();
-    mainLayout->addWidget(simulationGroup, 2);
+    contentLayout->addWidget(simulationGroup, 2);
     
     // Sağ panel (Eksen kontrolü)
     createAxisControlPanel();
-    mainLayout->addWidget(axisControlGroup, 1);
+    contentLayout->addWidget(axisControlGroup, 1);
+    
+    mainLayout->addLayout(contentLayout);
+}
+
+void MainWindow::createSafetyStatusPanel()
+{
+    safetyStatusGroup = new QGroupBox("Güvenlik Durumu");
+    QHBoxLayout *layout = new QHBoxLayout(safetyStatusGroup);
+    
+    // Limit switch durumu
+    QGroupBox *limitGroup = new QGroupBox("Limit Switch Durumu");
+    QGridLayout *limitLayout = new QGridLayout(limitGroup);
+    
+    xMinLimitLabel = new QLabel("X-: OK");
+    xMaxLimitLabel = new QLabel("X+: OK");
+    yMinLimitLabel = new QLabel("Y-: OK");
+    yMaxLimitLabel = new QLabel("Y+: OK");
+    zMinLimitLabel = new QLabel("Z-: OK");
+    zMaxLimitLabel = new QLabel("Z+: OK");
+    
+    // Limit switch etiketlerini stilize et
+    QList<QLabel*> limitLabels = {xMinLimitLabel, xMaxLimitLabel, yMinLimitLabel, yMaxLimitLabel, zMinLimitLabel, zMaxLimitLabel};
+    for (QLabel* label : limitLabels) {
+        label->setStyleSheet(
+            "QLabel { "
+            "color: #00aa00; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
+            "background-color: #e8f5e8; "
+            "}"
+        );
+    }
+    
+    limitLayout->addWidget(xMinLimitLabel, 0, 0);
+    limitLayout->addWidget(xMaxLimitLabel, 0, 1);
+    limitLayout->addWidget(yMinLimitLabel, 1, 0);
+    limitLayout->addWidget(yMaxLimitLabel, 1, 1);
+    limitLayout->addWidget(zMinLimitLabel, 2, 0);
+    limitLayout->addWidget(zMaxLimitLabel, 2, 1);
+    
+    layout->addWidget(limitGroup);
+    
+    // Spindle durumu
+    QGroupBox *spindleGroup = new QGroupBox("Spindle Durumu");
+    QVBoxLayout *spindleLayout = new QVBoxLayout(spindleGroup);
+    
+    spindleStateLabel = new QLabel("Durum: KAPALI");
+    spindleSpeedLabel = new QLabel("Hız: 0 RPM");
+    coolantStateLabel = new QLabel("Soğutucu: KAPALI");
+    
+    // Spindle etiketlerini stilize et
+    spindleStateLabel->setStyleSheet(
+        "QLabel { "
+        "color: #666666; "
+        "font-weight: bold; "
+        "padding: 2px; "
+        "border: 1px solid #666666; "
+        "border-radius: 3px; "
+        "background-color: #f0f0f0; "
+        "}"
+    );
+    
+    spindleSpeedLabel->setStyleSheet(
+        "QLabel { "
+        "color: #666666; "
+        "font-weight: bold; "
+        "padding: 2px; "
+        "border: 1px solid #666666; "
+        "border-radius: 3px; "
+        "background-color: #f0f0f0; "
+        "}"
+    );
+    
+    coolantStateLabel->setStyleSheet(
+        "QLabel { "
+        "color: #666666; "
+        "font-weight: bold; "
+        "padding: 2px; "
+        "border: 1px solid #666666; "
+        "border-radius: 3px; "
+        "background-color: #f0f0f0; "
+        "}"
+    );
+    
+    spindleLayout->addWidget(spindleStateLabel);
+    spindleLayout->addWidget(spindleSpeedLabel);
+    spindleLayout->addWidget(coolantStateLabel);
+    
+    layout->addWidget(spindleGroup);
+    
+    // Homing durumu
+    QGroupBox *homingGroup = new QGroupBox("Homing Durumu");
+    QVBoxLayout *homingLayout = new QVBoxLayout(homingGroup);
+    
+    homingStatusLabel = new QLabel("Durum: Hazır");
+    homingBtn = new QPushButton("Homing Başlat");
+    
+    homingStatusLabel->setStyleSheet(
+        "QLabel { "
+        "color: #00aa00; "
+        "font-weight: bold; "
+        "padding: 2px; "
+        "border: 1px solid #00aa00; "
+        "border-radius: 3px; "
+        "background-color: #e8f5e8; "
+        "}"
+    );
+    
+    homingLayout->addWidget(homingStatusLabel);
+    homingLayout->addWidget(homingBtn);
+    
+    layout->addWidget(homingGroup);
+    
+    // Homing butonu bağlantısı
+    connect(homingBtn, &QPushButton::clicked, this, [this]() {
+        if (serialComm && serialComm->isConnected()) {
+            if (serialComm->startHoming()) {
+                homingStatusLabel->setText("Durum: Homing...");
+                homingStatusLabel->setStyleSheet(
+                    "QLabel { "
+                    "color: #ff8800; "
+                    "font-weight: bold; "
+                    "padding: 2px; "
+                    "border: 1px solid #ff8800; "
+                    "border-radius: 3px; "
+                    "background-color: #fff8e8; "
+                    "}"
+                );
+                homingBtn->setEnabled(false);
+            }
+        }
+    });
 }
 
 void MainWindow::createAxisControlPanel()
@@ -441,8 +584,6 @@ void MainWindow::setupConnections()
     connect(zPosBtn, &QPushButton::clicked, this, &MainWindow::jogZPositive);
     connect(zNegBtn, &QPushButton::clicked, this, &MainWindow::jogZNegative);
     
-
-    
     // G-code işlemleri
     connect(openFileBtn, &QPushButton::clicked, this, &MainWindow::openGCodeFile);
     connect(saveFileBtn, &QPushButton::clicked, this, &MainWindow::saveGCodeFile);
@@ -468,6 +609,65 @@ void MainWindow::setupConnections()
     connect(stopBtn, &QPushButton::clicked, this, &MainWindow::stopCNC);
     connect(pauseBtn, &QPushButton::clicked, this, &MainWindow::pauseCNC);
     connect(resetBtn, &QPushButton::clicked, this, &MainWindow::resetCNC);
+    
+    // YENİ: Hardware limit switch kontrolleri
+    if (serialComm) {
+        connect(serialComm, &SerialCommunication::limitSwitchTriggered, this, [this](char axis, bool isMin) {
+            QString axisName = QString(axis);
+            QString direction = isMin ? "Min" : "Max";
+            logMessage(QString("HARDWARE LIMIT SWITCH TETİKLENDİ: %1 %2").arg(axisName).arg(direction));
+            emergencyStop();
+        });
+        
+        connect(serialComm, &SerialCommunication::limitSwitchReleased, this, [this](char axis, bool isMin) {
+            QString axisName = QString(axis);
+            QString direction = isMin ? "Min" : "Max";
+            logMessage(QString("Hardware limit switch serbest: %1 %2").arg(axisName).arg(direction));
+        });
+        
+        connect(serialComm, &SerialCommunication::limitSwitchStatusChanged, this, [this](const LimitSwitchStatus &status) {
+            updateLimitSwitchDisplay(status);
+        });
+        
+        // YENİ: Spindle kontrolleri
+        connect(serialComm, &SerialCommunication::spindleStateChanged, this, [this](SpindleState state) {
+            updateSpindleDisplay(state);
+        });
+        
+        connect(serialComm, &SerialCommunication::spindleSpeedChanged, this, [this](double speed) {
+            updateSpindleSpeedDisplay(speed);
+        });
+        
+        connect(serialComm, &SerialCommunication::coolantStateChanged, this, [this](bool on) {
+            updateCoolantDisplay(on);
+        });
+        
+        // YENİ: Homing kontrolleri
+        connect(serialComm, &SerialCommunication::homingStarted, this, [this]() {
+            logMessage("Homing işlemi başladı");
+            updateStatusBar("Homing işlemi başladı");
+        });
+        
+        connect(serialComm, &SerialCommunication::homingCompleted, this, [this]() {
+            logMessage("Homing işlemi tamamlandı");
+            updateStatusBar("Homing tamamlandı");
+            // Homing tamamlandıktan sonra emergency stop reset edilebilir
+            if (emergencyStopActive) {
+                showHomingCompletedDialog();
+            }
+        });
+        
+        connect(serialComm, &SerialCommunication::homingFailed, this, [this](const QString &error) {
+            logMessage("Homing hatası: " + error);
+            updateStatusBar("Homing hatası: " + error);
+        });
+        
+        // YENİ: Güvenlik timeout
+        connect(serialComm, &SerialCommunication::safetyTimeoutOccurred, this, [this]() {
+            logMessage("GÜVENLİK TIMEOUT - Sistem acil durduruldu");
+            emergencyStop();
+        });
+    }
 }
 
 // Slot fonksiyonları
@@ -625,6 +825,11 @@ void MainWindow::emergencyStop()
         // CNC işlemini durdur
         stopCNC();
         
+        // Hardware emergency stop gönder
+        if (serialComm && serialComm->isConnected()) {
+            serialComm->sendEmergencyStop();
+        }
+        
         // Buton görünümünü güncelle
         emergencyStopBtn->setText("EMERGENCY STOP\n(Reset to Continue)");
         emergencyStopBtn->setStyleSheet(
@@ -676,59 +881,379 @@ void MainWindow::emergencyStop()
 void MainWindow::resetEmergencyStop()
 {
     if (emergencyStopActive) {
-        emergencyStopActive = false;
+        // YENİ: Güvenli reset prosedürü
+        if (serialComm && serialComm->isConnected()) {
+            // Önce limit switch durumunu kontrol et
+            LimitSwitchStatus limitStatus = serialComm->getLimitSwitchStatus();
+            if (limitStatus.anyTriggered) {
+                QMessageBox::warning(this, "Güvenlik Uyarısı", 
+                    "Hardware limit switch tetikli! Önce limit switch'i serbest bırakın.");
+                return;
+            }
+            
+            // Homing işlemi gerekli mi kontrol et
+            QMessageBox::StandardButton reply = QMessageBox::question(this, "Güvenlik Kontrolü",
+                "Emergency Stop sonrası güvenli sıfırlama için homing işlemi gerekli.\n"
+                "Homing işlemini başlatmak istiyor musunuz?",
+                QMessageBox::Yes | QMessageBox::No);
+            
+            if (reply == QMessageBox::Yes) {
+                // Homing işlemini başlat
+                if (serialComm->startHoming()) {
+                    logMessage("Emergency Stop reset için homing işlemi başlatıldı");
+                    updateStatusBar("Homing işlemi başlatıldı...");
+                    return; // Homing tamamlanana kadar bekle
+                } else {
+                    QMessageBox::warning(this, "Hata", "Homing işlemi başlatılamadı!");
+                    return;
+                }
+            } else {
+                // Kullanıcı homing istemiyor, uyarı ver
+                QMessageBox::warning(this, "Güvenlik Uyarısı",
+                    "Homing yapmadan devam etmek güvenli değildir!\n"
+                    "Pozisyon hatası olabilir.");
+            }
+        }
         
-        // Buton görünümünü normale döndür
-        emergencyStopBtn->setText("EMERGENCY STOP");
-        emergencyStopBtn->setStyleSheet(
-            "QPushButton { "
-            "background-color: #ff0000; "
-            "color: white; "
-            "font-size: 18px; "
+        // Reset işlemini tamamla
+        completeEmergencyStopReset();
+    }
+}
+
+void MainWindow::completeEmergencyStopReset()
+{
+    emergencyStopActive = false;
+    
+    // Buton görünümünü normale döndür
+    emergencyStopBtn->setText("EMERGENCY STOP");
+    emergencyStopBtn->setStyleSheet(
+        "QPushButton { "
+        "background-color: #ff0000; "
+        "color: white; "
+        "font-size: 18px; "
+        "font-weight: bold; "
+        "border: 3px solid #cc0000; "
+        "border-radius: 10px; "
+        "padding: 10px; "
+        "}"
+        "QPushButton:hover { "
+        "background-color: #ff3333; "
+        "border-color: #ff0000; "
+        "}"
+        "QPushButton:pressed { "
+        "background-color: #cc0000; "
+        "border-color: #990000; "
+        "}"
+    );
+    
+    // Durum etiketini güncelle
+    emergencyStopLabel->setText("Sistem Hazır");
+    emergencyStopLabel->setStyleSheet(
+        "QLabel { "
+        "color: #00aa00; "
+        "font-size: 14px; "
+        "font-weight: bold; "
+        "padding: 5px; "
+        "border: 2px solid #00aa00; "
+        "border-radius: 5px; "
+        "background-color: #e8f5e8; "
+        "}"
+    );
+    
+    // Tüm kontrol butonlarını tekrar etkinleştir
+    startBtn->setEnabled(true);
+    stopBtn->setEnabled(true);
+    pauseBtn->setEnabled(true);
+    xPosBtn->setEnabled(true);
+    xNegBtn->setEnabled(true);
+    yPosBtn->setEnabled(true);
+    yNegBtn->setEnabled(true);
+    zPosBtn->setEnabled(true);
+    zNegBtn->setEnabled(true);
+    
+    // Log mesajı
+    logMessage("Emergency Stop reset edildi. Sistem tekrar hazır.");
+    updateStatusBar("Sistem Hazır");
+}
+
+void MainWindow::showHomingCompletedDialog()
+{
+    QMessageBox::information(this, "Homing Tamamlandı",
+        "Homing işlemi başarıyla tamamlandı.\n"
+        "Emergency Stop artık güvenli şekilde reset edilebilir.");
+    
+    // Homing tamamlandıktan sonra reset işlemini tamamla
+    completeEmergencyStopReset();
+}
+
+// YENİ: Limit switch display fonksiyonları
+void MainWindow::updateLimitSwitchDisplay(const LimitSwitchStatus &status)
+{
+    // Limit switch durumunu UI'da göster
+    QString statusText = "Limit Switch: ";
+    
+    // X ekseni limit switch'leri
+    if (status.xMin == LimitSwitchState::Triggered) {
+        statusText += "X- ";
+        xMinLimitLabel->setText("X-: TETİKLİ!");
+        xMinLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #ff0000; "
             "font-weight: bold; "
-            "border: 3px solid #cc0000; "
-            "border-radius: 10px; "
-            "padding: 10px; "
-            "}"
-            "QPushButton:hover { "
-            "background-color: #ff3333; "
-            "border-color: #ff0000; "
-            "}"
-            "QPushButton:pressed { "
-            "background-color: #cc0000; "
-            "border-color: #990000; "
+            "padding: 2px; "
+            "border: 1px solid #ff0000; "
+            "border-radius: 3px; "
+            "background-color: #ffe8e8; "
             "}"
         );
-        
-        // Durum etiketini güncelle
-        emergencyStopLabel->setText("Sistem Hazır");
-        emergencyStopLabel->setStyleSheet(
+    } else {
+        xMinLimitLabel->setText("X-: OK");
+        xMinLimitLabel->setStyleSheet(
             "QLabel { "
             "color: #00aa00; "
-            "font-size: 14px; "
             "font-weight: bold; "
-            "padding: 5px; "
-            "border: 2px solid #00aa00; "
-            "border-radius: 5px; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
             "background-color: #e8f5e8; "
             "}"
         );
-        
-        // Tüm kontrol butonlarını tekrar etkinleştir
-        startBtn->setEnabled(true);
-        stopBtn->setEnabled(true);
-        pauseBtn->setEnabled(true);
-        xPosBtn->setEnabled(true);
-        xNegBtn->setEnabled(true);
-        yPosBtn->setEnabled(true);
-        yNegBtn->setEnabled(true);
-        zPosBtn->setEnabled(true);
-        zNegBtn->setEnabled(true);
-        
-        // Log mesajı
-        logMessage("Emergency Stop reset edildi. Sistem tekrar hazır.");
-        updateStatusBar("Sistem Hazır");
     }
+    
+    if (status.xMax == LimitSwitchState::Triggered) {
+        statusText += "X+ ";
+        xMaxLimitLabel->setText("X+: TETİKLİ!");
+        xMaxLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #ff0000; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #ff0000; "
+            "border-radius: 3px; "
+            "background-color: #ffe8e8; "
+            "}"
+        );
+    } else {
+        xMaxLimitLabel->setText("X+: OK");
+        xMaxLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #00aa00; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
+            "background-color: #e8f5e8; "
+            "}"
+        );
+    }
+    
+    // Y ekseni limit switch'leri
+    if (status.yMin == LimitSwitchState::Triggered) {
+        statusText += "Y- ";
+        yMinLimitLabel->setText("Y-: TETİKLİ!");
+        yMinLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #ff0000; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #ff0000; "
+            "border-radius: 3px; "
+            "background-color: #ffe8e8; "
+            "}"
+        );
+    } else {
+        yMinLimitLabel->setText("Y-: OK");
+        yMinLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #00aa00; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
+            "background-color: #e8f5e8; "
+            "}"
+        );
+    }
+    
+    if (status.yMax == LimitSwitchState::Triggered) {
+        statusText += "Y+ ";
+        yMaxLimitLabel->setText("Y+: TETİKLİ!");
+        yMaxLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #ff0000; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #ff0000; "
+            "border-radius: 3px; "
+            "background-color: #ffe8e8; "
+            "}"
+        );
+    } else {
+        yMaxLimitLabel->setText("Y+: OK");
+        yMaxLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #00aa00; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
+            "background-color: #e8f5e8; "
+            "}"
+        );
+    }
+    
+    // Z ekseni limit switch'leri
+    if (status.zMin == LimitSwitchState::Triggered) {
+        statusText += "Z- ";
+        zMinLimitLabel->setText("Z-: TETİKLİ!");
+        zMinLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #ff0000; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #ff0000; "
+            "border-radius: 3px; "
+            "background-color: #ffe8e8; "
+            "}"
+        );
+    } else {
+        zMinLimitLabel->setText("Z-: OK");
+        zMinLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #00aa00; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
+            "background-color: #e8f5e8; "
+            "}"
+        );
+    }
+    
+    if (status.zMax == LimitSwitchState::Triggered) {
+        statusText += "Z+ ";
+        zMaxLimitLabel->setText("Z+: TETİKLİ!");
+        zMaxLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #ff0000; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #ff0000; "
+            "border-radius: 3px; "
+            "background-color: #ffe8e8; "
+            "}"
+        );
+    } else {
+        zMaxLimitLabel->setText("Z+: OK");
+        zMaxLimitLabel->setStyleSheet(
+            "QLabel { "
+            "color: #00aa00; "
+            "font-weight: bold; "
+            "padding: 2px; "
+            "border: 1px solid #00aa00; "
+            "border-radius: 3px; "
+            "background-color: #e8f5e8; "
+            "}"
+        );
+    }
+    
+    if (!status.anyTriggered) {
+        statusText += "Tümü OK";
+    }
+    
+    // Status bar'da göster
+    updateStatusBar(statusText);
+}
+
+// YENİ: Spindle display fonksiyonları
+void MainWindow::updateSpindleDisplay(SpindleState state)
+{
+    QString stateText;
+    QString color;
+    QString bgColor;
+    
+    switch (state) {
+        case SpindleState::Off:
+            stateText = "Durum: KAPALI";
+            color = "#666666";
+            bgColor = "#f0f0f0";
+            break;
+        case SpindleState::Clockwise:
+            stateText = "Durum: SAAT YÖNÜNDE";
+            color = "#008800";
+            bgColor = "#e8f5e8";
+            break;
+        case SpindleState::CounterClockwise:
+            stateText = "Durum: TERS YÖNDE";
+            color = "#880000";
+            bgColor = "#f5e8e8";
+            break;
+        case SpindleState::Error:
+            stateText = "Durum: HATA";
+            color = "#ff0000";
+            bgColor = "#ffe8e8";
+            break;
+    }
+    
+    spindleStateLabel->setText(stateText);
+    spindleStateLabel->setStyleSheet(
+        QString("QLabel { "
+                "color: %1; "
+                "font-weight: bold; "
+                "padding: 2px; "
+                "border: 1px solid %1; "
+                "border-radius: 3px; "
+                "background-color: %2; "
+                "}").arg(color).arg(bgColor)
+    );
+    
+    logMessage(stateText);
+}
+
+void MainWindow::updateSpindleSpeedDisplay(double speed)
+{
+    QString speedText = QString("Hız: %1 RPM").arg(static_cast<int>(speed));
+    spindleSpeedLabel->setText(speedText);
+    
+    // Hıza göre renk değiştir
+    QString color = "#666666";
+    if (speed > 0) {
+        color = "#008800";
+    }
+    
+    spindleSpeedLabel->setStyleSheet(
+        QString("QLabel { "
+                "color: %1; "
+                "font-weight: bold; "
+                "padding: 2px; "
+                "border: 1px solid %1; "
+                "border-radius: 3px; "
+                "background-color: #f0f0f0; "
+                "}").arg(color)
+    );
+    
+    logMessage(speedText);
+}
+
+void MainWindow::updateCoolantDisplay(bool on)
+{
+    QString status = on ? "Soğutucu: AÇIK" : "Soğutucu: KAPALI";
+    QString color = on ? "#008800" : "#666666";
+    QString bgColor = on ? "#e8f5e8" : "#f0f0f0";
+    
+    coolantStateLabel->setText(status);
+    coolantStateLabel->setStyleSheet(
+        QString("QLabel { "
+                "color: %1; "
+                "font-weight: bold; "
+                "padding: 2px; "
+                "border: 1px solid %1; "
+                "border-radius: 3px; "
+                "background-color: %2; "
+                "}").arg(color).arg(bgColor)
+    );
+    
+    logMessage(status);
 }
 
 void MainWindow::resetCNC()

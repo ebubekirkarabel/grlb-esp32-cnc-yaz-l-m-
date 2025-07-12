@@ -76,6 +76,14 @@ private slots:
     // Emergency Stop
     void emergencyStop();
     void resetEmergencyStop();
+    void completeEmergencyStopReset();
+    void showHomingCompletedDialog();
+    
+    // YENİ: Güvenlik display fonksiyonları
+    void updateLimitSwitchDisplay(const LimitSwitchStatus &status);
+    void updateSpindleDisplay(SpindleState state);
+    void updateSpindleSpeedDisplay(double speed);
+    void updateCoolantDisplay(bool on);
     
     // CNC kontrolü
     void startCNC();
@@ -100,6 +108,7 @@ private:
     void createGCodePanel();
     void createSimulationPanel();
     void createEmergencyStopPanel();
+    void createSafetyStatusPanel(); // YENİ: Güvenlik durumu paneli
     
     // Yardımcı fonksiyonlar
     void setupConnections();
@@ -132,6 +141,7 @@ private:
     QGroupBox *axisControlGroup;
     QGroupBox *gcodeGroup;
     QGroupBox *simulationGroup;
+    QGroupBox *safetyStatusGroup; // YENİ: Güvenlik durumu paneli
     
     // OpenGL 3D görselleştirme
     OpenGLWidget *openGLWidget;
@@ -194,6 +204,14 @@ private:
     bool emergencyStopActive;
     QPushButton *emergencyStopBtn;
     QLabel *emergencyStopLabel;
+    
+    // YENİ: Güvenlik UI bileşenleri
+    QLabel *xMinLimitLabel, *xMaxLimitLabel;
+    QLabel *yMinLimitLabel, *yMaxLimitLabel;
+    QLabel *zMinLimitLabel, *zMaxLimitLabel;
+    QLabel *spindleStateLabel, *spindleSpeedLabel, *coolantStateLabel;
+    QLabel *homingStatusLabel;
+    QPushButton *homingBtn;
     
     // Modül nesneleri
     GCodeParser *gcodeParser;

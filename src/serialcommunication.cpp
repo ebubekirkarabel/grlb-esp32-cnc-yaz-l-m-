@@ -6,16 +6,50 @@ SerialCommunication::SerialCommunication(QObject *parent)
     : QObject(parent)
     , serialPort(new QSerialPort(this))
     , timeoutTimer(new QTimer(this))
+    , safetyTimer(new QTimer(this))
+    , statusTimer(new QTimer(this))
     , isProcessingCommand(false)
+    , limitSwitchMonitoringEnabled(false)
+    , homingInProgress(false)
+    , homingEnabled(true)
+    , safetyChecksEnabled(true)
+    , safetyTimeout(10000) // 10 saniye
 {
     // Timer ayarları
     timeoutTimer->setSingleShot(true);
     timeoutTimer->setInterval(5000); // 5 saniye timeout
     
+    safetyTimer->setSingleShot(true);
+    safetyTimer->setInterval(safetyTimeout);
+    
+    statusTimer->setInterval(100); // 100ms = 10Hz status polling
+    
+    // Limit switch durumunu başlat
+    limitSwitchStatus = {
+        LimitSwitchState::NotTriggered,
+        LimitSwitchState::NotTriggered,
+        LimitSwitchState::NotTriggered,
+        LimitSwitchState::NotTriggered,
+        LimitSwitchState::NotTriggered,
+        LimitSwitchState::NotTriggered,
+        false
+    };
+    
+    // Spindle durumunu başlat
+    spindleStatus = {
+        SpindleState::Off,
+        0.0,
+        0.0,
+        false,
+        false
+    };
+    
     // Seri port bağlantıları
     connect(serialPort, &QSerialPort::readyRead, this, &SerialCommunication::handleReadyRead);
     connect(serialPort, &QSerialPort::errorOccurred, this, &SerialCommunication::handleError);
     connect(timeoutTimer, &QTimer::timeout, this, &SerialCommunication::handleTimeout);
+    connect(safetyTimer, &QTimer::timeout, this, &SerialCommunication::handleSafetyTimeout);
+    connect(statusTimer, &QTimer::timeout, this, &SerialCommunication::requestStatus);
 }
 
 SerialCommunication::~SerialCommunication()
@@ -38,6 +72,13 @@ bool SerialCommunication::connectToDevice(const QString &portName, int baudRate)
     
     if (serialPort->open(QIODevice::ReadWrite)) {
         emit connected();
+        
+        // Bağlantı sonrası güvenlik kontrollerini başlat
+        if (safetyChecksEnabled) {
+            startStatusMonitoring();
+            requestLimitSwitchStatus();
+        }
+        
         return true;
     } else {
         emit errorOccurred("Bağlantı hatası: " + serialPort->errorString());
@@ -48,6 +89,7 @@ bool SerialCommunication::connectToDevice(const QString &portName, int baudRate)
 void SerialCommunication::disconnectFromDevice()
 {
     if (serialPort->isOpen()) {
+        stopStatusMonitoring();
         serialPort->close();
         emit disconnected();
     }
@@ -56,6 +98,7 @@ void SerialCommunication::disconnectFromDevice()
     commandQueue.clear();
     isProcessingCommand = false;
     timeoutTimer->stop();
+    safetyTimer->stop();
 }
 
 bool SerialCommunication::isConnected() const
@@ -63,10 +106,318 @@ bool SerialCommunication::isConnected() const
     return serialPort->isOpen();
 }
 
+// YENİ: Hardware limit switch kontrolü
+void SerialCommunication::requestLimitSwitchStatus()
+{
+    if (isConnected()) {
+        sendCommand("$I"); // GRBL limit switch durumu sorgusu
+    }
+}
+
+LimitSwitchStatus SerialCommunication::getLimitSwitchStatus() const
+{
+    return limitSwitchStatus;
+}
+
+bool SerialCommunication::isAnyLimitSwitchTriggered() const
+{
+    return limitSwitchStatus.anyTriggered;
+}
+
+void SerialCommunication::enableLimitSwitchMonitoring(bool enabled)
+{
+    limitSwitchMonitoringEnabled = enabled;
+    if (enabled && isConnected()) {
+        startStatusMonitoring();
+    } else {
+        stopStatusMonitoring();
+    }
+}
+
+// YENİ: Spindle kontrolü
+bool SerialCommunication::setSpindleSpeed(double speed)
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    spindleStatus.targetSpeed = speed;
+    QString command = QString("S%1").arg(static_cast<int>(speed));
+    return sendCommand(command);
+}
+
+bool SerialCommunication::startSpindle(bool clockwise)
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    QString command = clockwise ? "M3" : "M4";
+    bool result = sendCommand(command);
+    
+    if (result) {
+        spindleStatus.state = clockwise ? SpindleState::Clockwise : SpindleState::CounterClockwise;
+        emit spindleStateChanged(spindleStatus.state);
+    }
+    
+    return result;
+}
+
+bool SerialCommunication::stopSpindle()
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    bool result = sendCommand("M5");
+    
+    if (result) {
+        spindleStatus.state = SpindleState::Off;
+        spindleStatus.speed = 0.0;
+        emit spindleStateChanged(spindleStatus.state);
+        emit spindleSpeedChanged(0.0);
+    }
+    
+    return result;
+}
+
+bool SerialCommunication::setCoolant(bool on)
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    QString command = on ? "M8" : "M9";
+    bool result = sendCommand(command);
+    
+    if (result) {
+        spindleStatus.coolantOn = on;
+        emit coolantStateChanged(on);
+    }
+    
+    return result;
+}
+
+bool SerialCommunication::setAirBlast(bool on)
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    QString command = on ? "M7" : "M9"; // M7 = air blast, M9 = tüm sıvıları kapat
+    bool result = sendCommand(command);
+    
+    if (result) {
+        spindleStatus.airBlastOn = on;
+        emit airBlastStateChanged(on);
+    }
+    
+    return result;
+}
+
+SpindleStatus SerialCommunication::getSpindleStatus() const
+{
+    return spindleStatus;
+}
+
+// YENİ: Homing işlemleri
+bool SerialCommunication::startHoming()
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    if (!homingEnabled) {
+        emit errorOccurred("Homing devre dışı");
+        return false;
+    }
+    
+    homingInProgress = true;
+    emit homingStarted();
+    
+    return sendCommand("$H"); // GRBL homing komutu
+}
+
+bool SerialCommunication::startHomingAxis(char axis)
+{
+    if (!isConnected()) {
+        emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    if (!homingEnabled) {
+        emit errorOccurred("Homing devre dışı");
+        return false;
+    }
+    
+    homingInProgress = true;
+    emit homingStarted();
+    
+    QString command = QString("$H%1").arg(axis);
+    return sendCommand(command);
+}
+
+bool SerialCommunication::isHoming() const
+{
+    return homingInProgress;
+}
+
+void SerialCommunication::setHomingEnabled(bool enabled)
+{
+    homingEnabled = enabled;
+}
+
+// YENİ: Güvenlik ayarları
+void SerialCommunication::setSafetyTimeout(int milliseconds)
+{
+    safetyTimeout = milliseconds;
+    safetyTimer->setInterval(milliseconds);
+}
+
+int SerialCommunication::getSafetyTimeout() const
+{
+    return safetyTimeout;
+}
+
+void SerialCommunication::enableSafetyChecks(bool enabled)
+{
+    safetyChecksEnabled = enabled;
+    if (enabled && isConnected()) {
+        startStatusMonitoring();
+    } else {
+        stopStatusMonitoring();
+    }
+}
+
+bool SerialCommunication::areSafetyChecksEnabled() const
+{
+    return safetyChecksEnabled;
+}
+
+// YENİ: Yardımcı fonksiyonlar
+void SerialCommunication::startStatusMonitoring()
+{
+    if (!statusTimer->isActive()) {
+        statusTimer->start();
+    }
+}
+
+void SerialCommunication::stopStatusMonitoring()
+{
+    if (statusTimer->isActive()) {
+        statusTimer->stop();
+    }
+}
+
+void SerialCommunication::checkSafetyConditions()
+{
+    // Limit switch kontrolü
+    if (limitSwitchStatus.anyTriggered) {
+        emit errorOccurred("Hardware limit switch tetiklendi!");
+        sendEmergencyStop();
+    }
+    
+    // Spindle güvenlik kontrolü
+    if (spindleStatus.state != SpindleState::Off && !spindleStatus.coolantOn) {
+        emit errorOccurred("Spindle çalışıyor ama soğutucu kapalı!");
+    }
+}
+
+bool SerialCommunication::validateSafetyCommand(const QString &command)
+{
+    // Güvenlik komutlarını kontrol et
+    if (command.startsWith("G0") || command.startsWith("G1")) {
+        // Hareket komutları için limit switch kontrolü
+        if (limitSwitchStatus.anyTriggered) {
+            emit errorOccurred("Limit switch tetikli - hareket engellendi");
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+// YENİ: Response parsing fonksiyonları
+void SerialCommunication::parseLimitSwitchResponse(const QString &response)
+{
+    // GRBL limit switch response parsing
+    if (response.contains("Limit")) {
+        // Limit switch durumunu güncelle
+        bool xMinTriggered = response.contains("X-");
+        bool xMaxTriggered = response.contains("X+");
+        bool yMinTriggered = response.contains("Y-");
+        bool yMaxTriggered = response.contains("Y+");
+        bool zMinTriggered = response.contains("Z-");
+        bool zMaxTriggered = response.contains("Z+");
+        
+        // Durumu güncelle
+        limitSwitchStatus.xMin = xMinTriggered ? LimitSwitchState::Triggered : LimitSwitchState::NotTriggered;
+        limitSwitchStatus.xMax = xMaxTriggered ? LimitSwitchState::Triggered : LimitSwitchState::NotTriggered;
+        limitSwitchStatus.yMin = yMinTriggered ? LimitSwitchState::Triggered : LimitSwitchState::NotTriggered;
+        limitSwitchStatus.yMax = yMaxTriggered ? LimitSwitchState::Triggered : LimitSwitchState::NotTriggered;
+        limitSwitchStatus.zMin = zMinTriggered ? LimitSwitchState::Triggered : LimitSwitchState::NotTriggered;
+        limitSwitchStatus.zMax = zMaxTriggered ? LimitSwitchState::Triggered : LimitSwitchState::NotTriggered;
+        
+        limitSwitchStatus.anyTriggered = xMinTriggered || xMaxTriggered || yMinTriggered || yMaxTriggered || zMinTriggered || zMaxTriggered;
+        
+        emit limitSwitchStatusChanged(limitSwitchStatus);
+        
+        // Limit switch tetiklendiyse uyarı ver
+        if (limitSwitchStatus.anyTriggered) {
+            emit errorOccurred("Hardware limit switch tetiklendi!");
+        }
+    }
+}
+
+void SerialCommunication::parseSpindleResponse(const QString &response)
+{
+    // Spindle durumu parsing
+    if (response.contains("S")) {
+        // Spindle hızı güncelleme
+        QRegularExpression speedRegex(R"(S(\d+))");
+        QRegularExpressionMatch match = speedRegex.match(response);
+        if (match.hasMatch()) {
+            double speed = match.captured(1).toDouble();
+            spindleStatus.speed = speed;
+            emit spindleSpeedChanged(speed);
+        }
+    }
+}
+
+void SerialCommunication::parseHomingResponse(const QString &response)
+{
+    if (response.contains("ok") && homingInProgress) {
+        homingInProgress = false;
+        emit homingCompleted();
+    } else if (response.contains("error") && homingInProgress) {
+        homingInProgress = false;
+        emit homingFailed("Homing hatası: " + response);
+    }
+}
+
+void SerialCommunication::handleSafetyTimeout()
+{
+    emit safetyTimeoutOccurred();
+    emit errorOccurred("Güvenlik timeout - sistem durduruldu");
+    sendEmergencyStop();
+}
+
+// Mevcut fonksiyonlar devam ediyor...
 bool SerialCommunication::sendCommand(const QString &command)
 {
     if (!isConnected()) {
         emit errorOccurred("Seri port bağlı değil");
+        return false;
+    }
+    
+    // Güvenlik kontrolü
+    if (safetyChecksEnabled && !validateSafetyCommand(command)) {
         return false;
     }
     
@@ -168,6 +519,14 @@ void SerialCommunication::handleReadyRead()
         QString line = serialPort->readLine().trimmed();
         if (!line.isEmpty()) {
             emit dataReceived(line);
+            
+            // Response parsing
+            parseStatusResponse(line);
+            parsePositionResponse(line);
+            parseLimitSwitchResponse(line);
+            parseSpindleResponse(line);
+            parseHomingResponse(line);
+            
             processReceivedData();
         }
     }
@@ -217,6 +576,11 @@ void SerialCommunication::sendNextCommand()
         emit commandSent(command.trimmed());
         isProcessingCommand = true;
         timeoutTimer->start();
+        
+        // Güvenlik kontrolü
+        if (safetyChecksEnabled) {
+            safetyTimer->start();
+        }
     } else {
         emit errorOccurred("Komut gönderilemedi");
         commandQueue.dequeue(); // Hatalı komutu kaldır
@@ -233,6 +597,12 @@ void SerialCommunication::parseStatusResponse(const QString &response)
         if (parts.size() >= 1) {
             QString status = parts[0];
             emit statusUpdated(status);
+            
+            // Homing durumu kontrolü
+            if (status == "Home" && homingInProgress) {
+                homingInProgress = false;
+                emit homingCompleted();
+            }
         }
     }
 }
@@ -270,4 +640,25 @@ QString SerialCommunication::formatJogCommand(char axis, double distance, double
 {
     // GRBL jog komutu formatı: $J=G91 X<distance> F<speed>
     return QString("$J=G91 %1%2 F%3").arg(axis).arg(distance).arg(speed);
+}
+
+QString SerialCommunication::formatSpindleCommand(double speed, bool clockwise)
+{
+    QString command = QString("S%1").arg(static_cast<int>(speed));
+    command += clockwise ? " M3" : " M4";
+    return command;
+}
+
+QString SerialCommunication::formatCoolantCommand(bool on)
+{
+    return on ? "M8" : "M9";
+}
+
+QString SerialCommunication::formatHomingCommand(char axis)
+{
+    if (axis == ' ') {
+        return "$H"; // Tüm eksenler
+    } else {
+        return QString("$H%1").arg(axis); // Belirli eksen
+    }
 } 

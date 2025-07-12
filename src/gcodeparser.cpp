@@ -103,6 +103,9 @@ QString GCodeParser::getCommandDescription(const QString &command) const
     descriptions["G1"] = "Doğrusal hareket";
     descriptions["G2"] = "Saat yönünde dairesel hareket";
     descriptions["G3"] = "Saat yönünün tersine dairesel hareket";
+    descriptions["G17"] = "XY düzlemi seçimi";
+    descriptions["G18"] = "XZ düzlemi seçimi";
+    descriptions["G19"] = "YZ düzlemi seçimi";
     descriptions["G20"] = "İnç birimi";
     descriptions["G21"] = "Milimetre birimi";
     descriptions["G28"] = "Ana pozisyona dön";
@@ -139,7 +142,7 @@ void GCodeParser::clearErrors()
 void GCodeParser::initializeSupportedCommands()
 {
     supportedCommands = {
-        "G0", "G1", "G2", "G3", "G20", "G21", "G28", "G90", "G91",
+        "G0", "G1", "G2", "G3", "G17", "G18", "G19", "G20", "G21", "G28", "G90", "G91",
         "M0", "M1", "M2", "M3", "M4", "M5", "M6", "M8", "M9"
     };
 }
@@ -195,9 +198,7 @@ QString GCodeParser::removeComments(const QString &line)
 bool GCodeParser::validateGCommand(GCodeCommand &command)
 {
     QString cmd = command.command;
-    
     if (cmd == "G0" || cmd == "G1") {
-        // G0/G1 için X, Y, Z, F parametreleri geçerli
         QList<QChar> validParams = {'X', 'Y', 'Z', 'F'};
         for (auto it = command.parameters.begin(); it != command.parameters.end(); ++it) {
             if (!validParams.contains(it.key())) {
@@ -207,7 +208,6 @@ bool GCodeParser::validateGCommand(GCodeCommand &command)
         }
     }
     else if (cmd == "G2" || cmd == "G3") {
-        // G2/G3 için X, Y, Z, I, J, K, F parametreleri geçerli
         QList<QChar> validParams = {'X', 'Y', 'Z', 'I', 'J', 'K', 'F'};
         for (auto it = command.parameters.begin(); it != command.parameters.end(); ++it) {
             if (!validParams.contains(it.key())) {
@@ -216,16 +216,30 @@ bool GCodeParser::validateGCommand(GCodeCommand &command)
             }
         }
     }
-    
+    else if (cmd == "G17" || cmd == "G18" || cmd == "G19") {
+        // Düzlem seçimi komutları parametresiz olmalı
+        if (!command.parameters.isEmpty()) {
+            command.errorMessage = QString("%1 komutu parametresiz olmalı").arg(cmd);
+            return false;
+        }
+    }
+    else if (cmd == "G28") {
+        // G28 için X, Y, Z parametreleri opsiyonel, başka parametre olmamalı
+        QList<QChar> validParams = {'X', 'Y', 'Z'};
+        for (auto it = command.parameters.begin(); it != command.parameters.end(); ++it) {
+            if (!validParams.contains(it.key())) {
+                command.errorMessage = QString("G28 için geçersiz parametre: %1").arg(it.key());
+                return false;
+            }
+        }
+    }
     return true;
 }
 
 bool GCodeParser::validateMCommand(GCodeCommand &command)
 {
     QString cmd = command.command;
-    
     if (cmd == "M3" || cmd == "M4") {
-        // M3/M4 için S parametresi geçerli
         QList<QChar> validParams = {'S'};
         for (auto it = command.parameters.begin(); it != command.parameters.end(); ++it) {
             if (!validParams.contains(it.key())) {
@@ -234,6 +248,12 @@ bool GCodeParser::validateMCommand(GCodeCommand &command)
             }
         }
     }
-    
+    else if (cmd == "M8" || cmd == "M9") {
+        // M8/M9 parametresiz olmalı
+        if (!command.parameters.isEmpty()) {
+            command.errorMessage = QString("%1 komutu parametresiz olmalı").arg(cmd);
+            return false;
+        }
+    }
     return true;
 } 
